@@ -45,58 +45,47 @@ gh workflow run build-windows.yaml --repo taoofshawn/deepseek-harness --ref mast
 gh run watch <run-id> --repo taoofshawn/deepseek-harness --exit-status
 gh run download <run-id> --repo taoofshawn/deepseek-harness --name deepseek-harness-windows-x64-unsigned
 ```
+## Mandatory-update policy: removed for unsigned builds (done)
 
-The workflow writes `apps/desktop/.env.windows` (git-ignored) from repository
-variables, falling back to the example values. Override via repo Settings →
-Secrets and variables → Actions → Variables (`DSH_DESKTOP_APP_ID`,
-`DSH_DESKTOP_MANDATORY_UPDATE_TEST_ORIGIN`,
-`DSH_DESKTOP_MANDATORY_UPDATE_PROD_ORIGIN`).
-
-## Mandatory-update policy: removed for unsigned builds
-
-**[Pending at time of writing — see "Pending work".]** Upstream's
-`apps/desktop/scripts/electron-builder-config.mjs` unconditionally resolves
-the mandatory-update policy (`resolveDesktopPolicyEnvironment`) and embeds it
-into the packaged manifest as `dshMandatoryUpdatePolicy`. The example
+Upstream's `apps/desktop/scripts/electron-builder-config.mjs` unconditionally
+resolves the mandatory-update policy (`resolveDesktopPolicyEnvironment`) and
+embeds it into the packaged manifest as `dshMandatoryUpdatePolicy`. The example
 `.env.windows` selects the **test** deployment, which sets
 `authentication: "feishu-test"` against `https://harness-test.deepseek.com`.
 
-Consequence on first launch of the installed app: a modal "Sign in to the
-test environment" window (parented, `modal: true`) blocks the main window
-until sign-in. In this build that window renders **blank** (the
-`dsh-app://shell/update-dialog.html` document loads with no scripts and no
-stylesheets — an empty `<html><head></head><body></body></html>`), so the app
-appears hung: blurred (the overlay inserts `body { filter: blur(2px) }` into
-the parent), unclickable, and even the native close button is unreachable
-because the invisible modal window sits exactly on top of the main window and
-swallows all mouse input.
+Consequence before the fix: on first launch the installed app opened a modal
+"Sign in to the test environment" window (parented, `modal: true`) that
+rendered **blank** (the `dsh-app://shell/update-dialog.html` document loaded
+with no scripts and no stylesheets), so the app appeared hung: blurred (the
+overlay inserts `body { filter: blur(2px) }` into the parent), unclickable,
+and even the native close button was unreachable because the invisible modal
+window sat exactly on top of the main window and swallowed all mouse input.
 
-Emergency recovery without a rebuild: attach to the app's CDP
-(`--remote-debugging-port=9222` on launch), find the page target
-`dsh-app://shell/update-dialog.html` in `http://127.0.0.1:9222/json/list`,
-and send `Page.close` over its WebSocket. The overlay closes, the blur is
-removed, and the app becomes fully usable for that session. Every fresh
-launch re-creates the dialog.
+**Fix applied in this fork** (commit `89913d07bb`): unsigned builds
+(`DSH_DESKTOP_UNSIGNED=1`) skip policy resolution and omit
+`dshMandatoryUpdatePolicy` from `extraMetadata`. The runtime treats an absent
+policy as disabled (`resolveDesktopPolicyConfig(undefined)` returns
+`undefined` in `apps/desktop/src/mandatory-update-policy.ts`). Verified in the
+rebuilt 0.1.6-alpha.2 installer: no policy key in the packaged manifest, and
+first launch shows exactly one window with no blocking overlay. Signed builds
+keep upstream's behavior unchanged.
 
-Durable fix directions (pick one):
+If a build ever regresses to the blank-blocking-dialog state, emergency
+recovery without a rebuild: launch with `--remote-debugging-port=9222`, find
+the page target `dsh-app://shell/update-dialog.html` in
+`http://127.0.0.1:9222/json/list`, and send `Page.close` over its WebSocket.
+The overlay closes, the blur is removed, and the app is usable for that
+session.
 
-- **No policy at all (chosen):** make
-  `electron-builder-config.mjs` skip `resolveDesktopPolicyEnvironment` and
-  omit `dshMandatoryUpdatePolicy` from `extraMetadata` when
-  `DSH_DESKTOP_UNSIGNED === '1'`. The app then boots with no update check and
-  no policy window (`resolveDesktopPolicyConfig(undefined)` returns
-  `undefined` in `apps/desktop/src/mandatory-update-policy.ts` — the "no
-  policy" path is supported at runtime; only the build script forces it in).
-- **Anonymous auth instead:** package with
-  `DSH_DESKTOP_AUTO_UPDATE_ENV=production`, which sets
-  `authentication: "anonymous"` against `https://harness.deepseek.com`. No
-  sign-in, but the app still polls a DeepSeek endpoint you may not control.
+If a policy is ever wanted again without sign-in, package with
+`DSH_DESKTOP_AUTO_UPDATE_ENV=production` (`authentication: "anonymous"`
+against `https://harness.deepseek.com`) and remove the unsigned skip.
 
 ## Pending work (as of 2026-09-18)
 
-- Rebuild without the mandatory-update policy (option above), push, run the
-  workflow, reinstall. The currently installed
-  `deepseek-harness-0.1.6-alpha.2-win-x64.exe` still carries the test policy.
+- ~~Rebuild without the mandatory-update policy~~ — done (commit `89913d07bb`,
+  verified in the rebuilt installer). Reinstall from the latest workflow
+  artifact to replace the currently installed test-policy build.
 - Websearch plugin ("build without plugin, add later" decision): the packaged
   app's plugin manager installs only from `registry.npmjs.org`
   (`DESKTOP_REGISTRY` hardcoded in `apps/desktop/src/project-manager.ts`;
