@@ -41,7 +41,11 @@ export function createElectronBuilderConfig(
   preparedRuntime = undefined,
 ) {
   const appId = resolveDesktopAppId(env)
-  const policy = resolveDesktopPolicyEnvironment(env)
+  // Fork change: unsigned builds omit the mandatory-update policy entirely.
+  // The test deployment requires Feishu sign-in against the internal test
+  // origin, and the packaged sign-in window renders blank, blocking the app.
+  const unsignedEarly = env.DSH_DESKTOP_UNSIGNED === '1'
+  const policy = unsignedEarly ? undefined : resolveDesktopPolicyEnvironment(env)
   const targetPlatform = env.DSH_DESKTOP_TARGET_PLATFORM
   const resolvedPlatform = targetPlatform ?? hostPlatform
   const resolvedArch = env.DSH_DESKTOP_TARGET_ARCH ?? hostArch
