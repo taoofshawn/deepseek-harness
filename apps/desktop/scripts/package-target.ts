@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process'
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { parseArgs } from 'node:util'
 import { join, resolve } from 'node:path'
+import { pnpmInvocation } from '../../../scripts/pnpm-invocation.ts'
 import {
   desktopBuildRecordFilename,
   resolveDesktopAutoUpdateConfig,
@@ -257,23 +258,20 @@ function runPnpm(
   cwd: string = APP_ROOT,
   run?: ReturnType<typeof createPackagingRun>,
 ): Promise<void> {
-  const pnpmEntry = process.env.npm_execpath
-  if (pnpmEntry === undefined || pnpmEntry === '') {
-    throw new Error('desktop package: invoke this script through a pnpm package command')
-  }
-  if (run !== undefined) return run.run(args.join(' '), process.execPath, [pnpmEntry, ...args], { cwd, env })
-  return new Promise((resolvePromise, reject) => {
-    const child = spawn(process.execPath, [pnpmEntry, ...args], {
-      cwd,
-      env,
-      stdio: 'inherit',
-    })
-    child.once('error', reject)
-    child.once('close', (code, signal) => {
-      if (code === 0) resolvePromise()
-      else reject(new Error(`desktop package: pnpm ${args.join(' ')} exited with ${String(code ?? signal)}`))
-    })
+  const { command, args: invocationArgs } = pnpmInvocation(args, env)
+  if (run !== undefined) return run.run(args.join(' '), command, invocationArgs, { cwd, env })
+  const { promise, resolve, reject } = Promise.withResolvers<void>()
+  const child = spawn(command, invocationArgs, {
+    cwd,
+    env,
+    stdio: 'inherit',
   })
+  child.once('error', reject)
+  child.once('close', (code, signal) => {
+    if (code === 0) resolve()
+    else reject(new Error(`desktop package: pnpm ${args.join(' ')} exited with ${String(code ?? signal)}`))
+  })
+  return promise
 }
 
 async function main(): Promise<void> {
