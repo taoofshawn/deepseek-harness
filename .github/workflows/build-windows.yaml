@@ -1,0 +1,61 @@
+# Local addition: builds the unsigned Windows desktop installer on a GitHub
+# Actions runner (VS C++ Build Tools and the Windows SDK are preinstalled on
+# windows-2022) and uploads it as a workflow artifact. Modeled after the
+# fluffychat build-windows workflow. Runs on demand from the Actions tab.
+#
+# The desktop packaging reads release settings from apps/desktop/.env.windows,
+# which is git-ignored; the workflow writes it from repository variables
+# (settings > Actions > Variables) with fallbacks to the example values.
+
+name: Build Windows
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build_windows:
+    # windows-2022 pins MSVC 14.4x and the matching Windows SDK.
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Write desktop packaging environment
+        shell: bash
+        run: |
+          cat > apps/desktop/.env.windows <<EOF
+          DSH_DESKTOP_APP_ID=${DSH_DESKTOP_APP_ID:-com.deepseek.harness}
+          DSH_DESKTOP_AUTO_UPDATE_ENV=test
+          DOWNLOAD_TEST_ORIGIN=
+          DSH_DESKTOP_MANDATORY_UPDATE_TEST_ORIGIN=${DSH_DESKTOP_MANDATORY_UPDATE_TEST_ORIGIN:-https://harness-test.deepseek.com}
+          DSH_DESKTOP_MANDATORY_UPDATE_PROD_ORIGIN=${DSH_DESKTOP_MANDATORY_UPDATE_PROD_ORIGIN:-https://harness.deepseek.com}
+          DSH_DESKTOP_WINDOWS_CER_FILE=
+          DSH_DESKTOP_WINDOWS_SIGNTOOL=
+          DSH_DESKTOP_WINDOWS_KEY_CONTAINER=
+          DSH_DESKTOP_WINDOWS_TOKEN_PIN=
+          EOF
+        env:
+          DSH_DESKTOP_APP_ID: ${{ vars.DSH_DESKTOP_APP_ID }}
+          DSH_DESKTOP_MANDATORY_UPDATE_TEST_ORIGIN: ${{ vars.DSH_DESKTOP_MANDATORY_UPDATE_TEST_ORIGIN }}
+          DSH_DESKTOP_MANDATORY_UPDATE_PROD_ORIGIN: ${{ vars.DSH_DESKTOP_MANDATORY_UPDATE_PROD_ORIGIN }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build unsigned Windows installer
+        run: pnpm run package:desktop:win:x64:unsigned
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: deepseek-harness-windows-x64-unsigned
+          path: apps/desktop/.desktop-build/targets/win-x64/unsigned-artifacts/*.exe
+          if-no-files-found: error
