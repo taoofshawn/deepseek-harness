@@ -25,14 +25,15 @@ name: E2E (real DeepSeek API)
 # The fork/secret model and its public-repo implications are recorded in
 # .agents/notes/implemented/testing/2026-06-19-real-api-e2e-ci.md.
 #
-# Note: this fork has no DeepSeek API key, and scheduled triggers are
-# auto-disabled after 60 days of repo inactivity; push/pull_request/
-# workflow_dispatch act as backstops. The upstream nightly cron schedule was
-# removed because the fork must not run scheduled real-API tests without a
-# configured key.
+# Fork: dispatch-only. Upstream also ran this on push/pull_request/schedule,
+# but the fork has no DEEPSEEK_API_KEY secret, and the preflight step fails
+# loudly on a missing key by design (a keyless run would self-skip and report
+# a false green). Keep the workflow for a manual run once a key is configured.
+on:
+  workflow_dispatch:
 
 # Keep only the newest validation in each workflow/ref, including master
-# pushes, nightly runs, and manual dispatches.
+# pushes and manual dispatches.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
